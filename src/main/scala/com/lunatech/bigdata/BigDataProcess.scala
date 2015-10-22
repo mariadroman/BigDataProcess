@@ -1,9 +1,6 @@
 package com.lunatech.bigdata
 
 import java.io.File
-import com.lunatech.bigdata.model.Event
-import org.json4s._
-import org.json4s.jackson.JsonMethods._
 import scala.io.Source
 
 /**
@@ -11,8 +8,7 @@ import scala.io.Source
  */
 object BigDataProcess extends App {
 
-  implicit val formats = DefaultFormats
-  private val DIR = "/Documents/GitHubJanuary"
+  private val DIR = "/Documents/LogsGitHub"
 
   // Load file names
   val fileNames = new File(DIR).listFiles.filter(_.getName.endsWith("json")).toList
@@ -51,11 +47,12 @@ object BigDataProcess extends App {
   def getEvents(content: List[String]): List[String] = {
     for {
       line <- content
-    } yield {
-      val json: JValue = parse(line.toString.replace("type", "evType").replace("public", "evPublic").replace("created_at", "evCreated"))
-      val msg = json.extract[Event]
-      msg.evType
-    }
+      tokens <- line.split(",")
+      if tokens.startsWith("\"type\":")
+      token <- tokens.split(":")
+      if token.endsWith("Event\"")
+      eventType <- token.split(":")
+    } yield eventType
   }
 
   /**
