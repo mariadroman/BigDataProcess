@@ -12,70 +12,51 @@ import scala.io.Source
 object BigDataProcess extends App {
 
   implicit val formats = DefaultFormats
-  private val DIR = "/Documents/GitHubJanuary"
+  private val DIR = "/tmp/GitHubArchiveJan"
 
   // Load file names
-  val fileNames = new File(DIR).listFiles.filter(_.getName.endsWith("json")).toList
+  private val files = new File(DIR).listFiles.filter(_.getName.endsWith("json")).toList
+  private val fileNames = files.map(_.getPath)
 
-  //Extract data
-  println("Processing files...")
-  val types = for {
-    name <- fileNames
-  } yield {
-    val content = getEvents(getContent(name.getPath)).groupBy(x => x).map(a => (a._1, a._2.length))
-    content
-  }
+  // Process files
+  println(s"Processing ${fileNames.size} files...")
+  private val types = fileNames.flatMap(x => getContent(x)).groupBy(x => x._1).mapValues(_.map(_._2).sum)
 
-  // Prepare results
-  private val result: Map[String, Int] = types.flatten.groupBy(x => x._1).map(a => (a._1, a._2.map(_._2).sum))
+  // Prepare and display results
   println("Printing report...")
-  println(prepareReport(result))
+  println(prepareReport(types))
 
   /**
-   * Extract content of a file.
+   * Given file name, search all event occurrences
    * @param fileName file name
-   * @return List of string containing one line of the file per element
+   * @return Map with all events and occurrences
    */
-  def getContent(fileName: String): List[String] = {
+  def getContent(fileName: String): Map[String, Int] = {
     val file = Source.fromFile(s"$fileName")
     val content = file.getLines().toList
+    val eventsPerFile = content.map(x =>
+      parse(x.toString.replace("type", "evType").replace("public", "evPublic").replace("created_at", "evCreated"))
+        .extract[Event]
+        .evType)
+      .groupBy(x => x)
+      .map(x => (x._1, x._2.length))
     file.close()
-    content
+    eventsPerFile
   }
 
   /**
-   * Extract the events' name
-   * @param content information in JSON format
-   * @return List of events' occurrence in the content
-   */
-  def getEvents(content: List[String]): List[String] = {
-    for {
-      line <- content
-    } yield {
-      val json: JValue = parse(line.toString.replace("type", "evType").replace("public", "evPublic").replace("created_at", "evCreated"))
-      val msg = json.extract[Event]
-      msg.evType
-    }
-  }
-
-  /**
-   * Format the report to be printed easy to read
+   * Given a map of events and their number of occurrences, provide an easy-to-read information string
    * @param inf information to be formatted
    * @return String properly formatted for printing
    */
   def prepareReport(inf: Map[String, Int]): String = {
     val maxLeftSpaces = inf.map(_._1.length).max
     val maxRightSpaces = inf.map(_._2.toString.length).max
-
-    val r = inf.toSeq.sortBy(_._1).toList
-
+    val r = inf.toSeq.sortBy(_._2).toList
     val report = for {
       m <- r
-    } yield (" " * (maxLeftSpaces - m._1.length)) + m._1  + " | " + (" " * (maxRightSpaces - m._2.toString.length)) + m._2
-
+    } yield (" " * (maxLeftSpaces - m._1.length)) + m._1 + " | " + (" " * (maxRightSpaces - m._2.toString.length)) + m._2
     report.mkString("\n")
   }
 
 }
-
-
