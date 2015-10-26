@@ -4,7 +4,11 @@ import java.io.File
 import com.lunatech.bigdata.model.Event
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
 import scala.io.Source
+import scala.util.{Failure, Success}
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * Process big data in a particular directory.
@@ -15,16 +19,42 @@ object BigDataProcess extends App {
   private val DIR = "/tmp/GitHubArchiveJan"
 
   // Load file names
-  private val files = new File(DIR).listFiles.filter(_.getName.endsWith("json")).toList
-  private val fileNames = files.map(_.getPath)
+  private val fileNames = getFileNames(DIR)
 
-  // Process files
+  // Prepare futures
   println(s"Processing ${fileNames.size} files...")
-  private val types = fileNames.flatMap(x => getContent(x)).groupBy(x => x._1).mapValues(_.map(_._2).sum)
+  val futures = createFutures(fileNames)
 
-  // Prepare and display results
-  println("Printing report...")
-  println(prepareReport(types))
+  private val waiting: Future[List[Map[String, Int]]] = Future.sequence(futures)
+  private val ready: Future[List[Map[String, Int]]] = Await.ready(waiting,Duration.Inf)
+
+  ready.onComplete {
+    case Success(v) => println(prepareReport(v.flatten.map(x => x._1).groupBy(x => x).map(x => (x._1, x._2.length))))
+    case Failure(ex) => println("Error: " + ex.getMessage)
+  }
+  println("done")
+
+  /**
+   * For a given path, get all the json files.
+   * @param s path
+   * @return List of json file paths
+   */
+  private def getFileNames(s: String): List[String] = {
+    new File(s).listFiles.filter(x => x.isFile && x.getName.endsWith("json")).toList.map(_.getPath)
+  }
+
+  /**
+   * For every file in the list, create a future to process the file
+   * @param files list of file names
+   * @return list of futures having a map with the results per file.
+   */
+  private def createFutures(files: List[String]): List[Future[Map[String, Int]]] = {
+    files.map {
+      x => Future {
+        getContent(x)
+      }
+    }
+  }
 
   /**
    * Given file name, search all event occurrences
