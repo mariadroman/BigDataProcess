@@ -1,77 +1,58 @@
 package com.lunatech.bigdata
 
 import java.io.File
-import com.lunatech.bigdata.model.Event
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
 import scala.io.Source
-import scala.util.{Failure, Success}
 import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * Process big data in a particular directory.
  */
-object BigDataProcess extends App {
+object BigDataProcess {
 
   implicit val formats = DefaultFormats
-  private val DIR = "/tmp/GitHubArchiveJan"
+  private val PATH = "/tmp/GitHubArchiveJan"
 
-  // Load file names
-  private val fileNames = getFileNames(DIR)
+  def main(args: Array[String]): Unit = {
+    // Load file names
+    val filePaths = getFilePaths(PATH)
 
-  // Prepare futures
-  println(s"Processing ${fileNames.size} files...")
-  val futures = createFutures(fileNames)
+    // Map every file with a map containing the events and no of occurrences, as a future.
+    val allEventsInFiles: Seq[Future[Map[String, Int]]] = filePaths.map(x => getEvents(x))
+    val futureSeq: Future[Seq[Map[String, Int]]] = Future.sequence(allEventsInFiles)
 
-  private val waiting: Future[List[Map[String, Int]]] = Future.sequence(futures)
-  private val ready: Future[List[Map[String, Int]]] = Await.ready(waiting,Duration.Inf)
+    //When future is completed, will return a sequence of maps, one map per file.
+    val filesResults = Await.result(futureSeq, Duration.Inf)
+    val report = filesResults.flatten.groupBy(x => x._1).mapValues(_.map(_._2).sum)
 
-  ready.onComplete {
-    case Success(v) => println(prepareReport(v.flatten.map(x => x._1).groupBy(x => x).map(x => (x._1, x._2.length))))
-    case Failure(ex) => println("Error: " + ex.getMessage)
+    println("Report:")
+    println(prepareReport(report))
+
   }
-  println("done")
+
+  /**
+   * For a given file path, extract all the events and create a Map with the event name and number of occurrences.
+   * @param filePath
+   * @return Future of map with event names and occurrences
+   */
+  private def getEvents (filePath: String): Future[Map[String, Int]] = Future {
+    println(s"Working on file $filePath")
+    Source.fromFile(filePath.toString).getLines().toList
+      .map(line => (parse(line.toString) \ "type").extract[String]) //extract event types directly per line
+      .groupBy(x => x)
+      .map(event => (event._1, event._2.length)) //counting how many events per type
+  }
 
   /**
    * For a given path, get all the json files.
    * @param s path
    * @return List of json file paths
    */
-  private def getFileNames(s: String): List[String] = {
-    new File(s).listFiles.filter(x => x.isFile && x.getName.endsWith("json")).toList.map(_.getPath)
-  }
-
-  /**
-   * For every file in the list, create a future to process the file
-   * @param files list of file names
-   * @return list of futures having a map with the results per file.
-   */
-  private def createFutures(files: List[String]): List[Future[Map[String, Int]]] = {
-    files.map {
-      x => Future {
-        getContent(x)
-      }
-    }
-  }
-
-  /**
-   * Given file name, search all event occurrences
-   * @param fileName file name
-   * @return Map with all events and occurrences
-   */
-  def getContent(fileName: String): Map[String, Int] = {
-    val file = Source.fromFile(s"$fileName")
-    val content = file.getLines().toList
-    val eventsPerFile = content.map(x =>
-      parse(x.toString.replace("type", "evType").replace("public", "evPublic").replace("created_at", "evCreated"))
-        .extract[Event]
-        .evType)
-      .groupBy(x => x)
-      .map(x => (x._1, x._2.length))
-    file.close()
-    eventsPerFile
+  private def getFilePaths(s: String): Seq[String] = {
+    new File(s).listFiles.filter(x => x.isFile && x.getName.endsWith("json")).toSeq.map(_.getPath)
   }
 
   /**
